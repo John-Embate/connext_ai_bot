@@ -1,75 +1,72 @@
-#!/usr/bin/env python
-# pylint: disable=unused-argument
-# This program is dedicated to the public domain under the CC0 license.
-
-"""
-Simple Bot to reply to Telegram messages.
-
-First, a few handler functions are defined. Then, those functions are passed to
-the Application and registered at their respective places.
-Then, the bot is started and runs until we press Ctrl-C on the command line.
-
-Usage:
-Basic Echobot example, repeats messages.
-Press Ctrl-C on the command line or send a signal to the process to stop the
-bot.
-"""
-
 import logging
 import os
-
-from dotenv import load_dotenv
-from telegram import ForceReply, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import Update, ForceReply, ReplyKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+import requests
 
 # Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-# set higher logging level for httpx to avoid all GET and POST requests being logged
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Your API details, using environment variables for security
+API_URL = f"https://flowiseai-railway-production-aab9.up.railway.app/api/v1/prediction/{os.getenv('Flowise_API_KEY')}"
 
-# Define a few command handlers. These usually take the two arguments update and
-# context.
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /start is issued."""
-    user = update.effective_user
-    await update.message.reply_html(
-        rf"Hi {user.mention_html()}!",
-        reply_markup=ForceReply(selective=True),
+# Function to send queries to your API
+def query_api(question):
+    payload = {"question": question}
+    response = requests.post(API_URL, json=payload)
+    return response.json()
+
+# Predefined questions
+premade_questions = [
+    "Can we file for leave on the PH holidays?",
+    "How are my leave credits calculated?",
+    "In what instances would I get disqualified for a perfect attendance bonus?",
+    "How does Connext calculate my taxes?",
+    "How can I file for overtime in Sprout?",
+    "What solutions does Connext offer?",
+    "What is Connext's mission?",
+    "Can you discuss with me about Connext's Company Culture?"
+]
+
+# Define command handlers
+def start(update: Update, context: CallbackContext) -> None:
+    """Sends a message with a custom keyboard with predefined questions when the command /start is issued."""
+    reply_keyboard = [premade_questions[i:i + 2] for i in range(0, len(premade_questions), 2)]
+    update.message.reply_text(
+        'Hi! Use the custom keyboard below to send a predefined question, or type your own question.',
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, input_field_placeholder='Ask me something...')
     )
 
+def help_command(update: Update, context: CallbackContext) -> None:
+    """Sends a message when the command /help is issued."""
+    update.message.reply_text('You can send me a question directly, or choose from the predefined ones using the custom keyboard!')
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /help is issued."""
-    await update.message.reply_text("Help!")
+def handle_message(update: Update, context: CallbackContext) -> None:
+  """Handle the message whether it is a predefined question or a custom question."""
+  question = update.message.text
+  response = query_api(question)
 
+  # Extracting the 'text' field from the response
+  response_text = response.get('text', 'Sorry, there was no response.')    # Default to a placeholder if no text
 
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Echo the user message."""
-    await update.message.reply_text(update.message.text)
+  # Replace '\n' with actual new lines for Telegram message formatting
+  formatted_text = response_text.replace('\\n', '\n')
 
+  update.message.reply_text(formatted_text)
 
 def main() -> None:
     """Start the bot."""
-    load_dotenv()
+    updater = Updater(os.getenv('Telegram_Bot_API_KEY'))
 
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token(os.environ["TOKEN"]).build()
+    dispatcher = updater.dispatcher
 
-    # on different commands - answer in Telegram
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
-    # on non command i.e message - echo the message on Telegram
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    updater.start_polling()
+    updater.idle()
 
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
